@@ -1,1 +1,173 @@
 01_bronze_ingestion.py
+
+# load bronze data
+bronze_df = spark.read.format("delta").load(bronze_path)
+
+# Data Cleaning Transformtions
+silver_df = bronze_df.dropna()\
+    .dropDuplicates()\
+    .select([trim(col(c)).alias(c) for c in bronze_df.columns])
+  #save silver data
+silver_df.write.format("delta")\
+    .mode("overwrite")\
+    .save(silver_path)
+print("Silver layer created successfully — data cleaned and ready for analysis")
+# COMMAND ----------
+
+
+
+
+02_silver_cleaning.py
+#   Load the Silver data from Azure-mounted storage
+silver_path = "/mnt/animal_rescue/silver"
+silver_df = spark.read.format("delta").load(silver_path)
+
+print("Silver data reloaded ")
+display(silver_df.limit(5))
+
+# COMMAND ----------
+
+# Conversion of strings to numeric data
+from pyspark.sql.functions import col, when, regexp_extrac
+#  Create safe numeric versions of the two problem columns
+gold_df = silver_df.withColumn(
+    "PumpHoursTotal_num",
+    when(col("PumpHoursTotal").cast("float").isNotNull(),
+         col("PumpHoursTotal").cast("float")
+    ).otherwise(None)
+).withColumn(
+    "IncidentNotionalCost_GBP_num",
+    when(regexp_extract(col("IncidentNotionalCost_GBP"), "^[0-9.]+$", 0) != "",
+         col("IncidentNotionalCost_GBP").cast("float")
+    ).otherwise(None)
+)
+print(" Numeric data cleaning done!")
+display(gold_df.limit(5))
+
+# COMMAND ----------
+# CONVERT DATE STRING TO TIMESTAMP
+from pyspark.sql.functions import to_timestamp
+
+# Convert DateTimeOfCall string into a real timestamp
+gold_df = gold_df.withColumn(
+    "DateTimeOfCall_ts",
+    to_timestamp("DateTimeOfCall", "dd/MM/yyyy HH:mm")
+)
+print("✅ DateTimeOfCall converted to timestamp")
+display(gold_df.select("DateTimeOfCall", "DateTimeOfCall_ts").limit(5))
+
+# COMMAND ----------
+
+
+
+
+03_gold_analytics.py
+
+# GOLD LAYER: Analytics
+
+from pyspark.sql.functions import sum, avg, count, col, year
+# 1. How many animal rescues were there per animal type
+rescues_by_animal = gold_df.groupBy("AnimalGroupParent") \
+    .agg(count("*").alias("TotalRescues"))
+
+# 2. What was the total cost of each animal type
+total_cost_by_animal = gold_df.groupBy("AnimalGroupParent") \
+    .agg(sum("IncidentNotionalCost_GBP_num").alias("TotalCost_GBP"))
+
+# 3. What is the recues for each year
+rescues_per_year = gold_df.groupBy(year("DateTimeOfCall_ts").alias("Year")) \
+    .agg(count("*").alias("TotalRescues"))
+
+4. # What are the top 10 boroughs with the most animal rescues
+top_boroughs = gold_df.groupBy("Borough") \
+    .agg(count("*").alias("TotalRescues")) \
+    .orderBy(col("TotalRescues").desc()) \
+    .limit(10)
+5 #
+average_cost_by_year = gold_df.groupBy(year("DateTimeOfCall_ts").alias("Year")) \
+    .agg(avg("IncidentNotionalCost_GBP_num").alias("AvgYearlyCost_GBP"))
+
+yearly_trends_all = gold_df.groupBy(year("DateTimeOfCall_ts").alias("Year")) \
+    .agg(
+        count("*").alias("TotalRescues"),
+        sum("IncidentNotionalCost_GBP_num").alias("TotalCost_GBP")
+    )
+
+print("✅ All Gold Analytics now working with proper year extraction")
+
+
+# COMMAND ----------
+
+display(dbutils.fs.ls("/mnt/animal_rescue/gold/
+
+
+
+
+
+# snowflake connection setup
+SNOWFLAKE_ACCOUNT = "vo46991.uk-south.azure"
+SNOWFLAKE_USERNAME= "username"
+SNOWFLAKE_PASSWORD = "password"
+SNOWFLAKE_DATABASE = "ANIMAL_RESCUE_DB"
+SNOWFLAKE_WAREHOUSE = "ANIMAL_WH"
+SNOWFLAKE_SCHEMA = "GOLD_LAYER"
+
+print("Snowflake connection setup successful")
+
+# COMMAND ----------
+
+# Test Snowflake connection
+try:
+   # Install Snowflake connector
+    %pip install snowflake-connector-python
+    
+    print("Snowflake connector installed successfully")
+except Exception as e:
+    print(f"Installation error: {e}")
+
+# COMMAND ----------
+
+# Test Snowflake connection
+import snowflake.connector
+
+# COMMAND ----------
+
+# Test Snowflake connection
+import snowflake.connector
+
+# Your Snowflake details - REPLACE WITH YOURS
+SNOWFLAKE_ACCOUNT = "vo46991.uk-south.azure"
+SNOWFLAKE_USERNAME = "Username"
+SNOWFLAKE_PASSWORD = "PASSWORD  "
+SNOWFLAKE_DATABASE = "ANIMAL_RESCUE_DB"
+SNOWFLAKE_WAREHOUSE = "ANIMAL_WH"
+SNOWFLAKE_SCHEMA = "GOLD_LAYER"
+
+print("🔧 Testing Snowflake connection...")
+
+try:
+    # Connect to Snowflake
+    connection = snowflake.connector.connect(
+        user=SNOWFLAKE_USERNAME,
+        password=SNOWFLAKE_PASSWORD,
+        account=SNOWFLAKE_ACCOUNT,
+        warehouse=SNOWFLAKE_WAREHOUSE,
+        database=SNOWFLAKE_DATABASE,
+        schema=SNOWFLAKE_SCHEMA
+    )
+    
+    print("✅ SUCCESS! Connected to Snowflake!")
+    
+    # Test by running a simple query
+    cursor = connection.cursor()
+    cursor.execute("SELECT CURRENT_WAREHOUSE(), CURRENT_DATABASE()")
+    result = cursor.fetchone()
+    print(f"✅ Connected to: Warehouse={result[0]}, Database={result[1]}")
+    
+    cursor.close()
+    connection.close()
+    
+except Exception as e:
+    print(f"❌ Connection failed: {e}")
+
+
