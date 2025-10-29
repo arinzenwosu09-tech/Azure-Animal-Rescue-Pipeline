@@ -70,7 +70,16 @@ LinkedIn: www.linkedin.com/in/nwosuarinze22
 
 
 
-# Architecture overview
+
+## 🖼 Architecture Overview
+
+This pipeline follows the Medallion Architecture (Bronze → Silver → Gold)
+to deliver trusted analytics data from raw source to business insights.
+
+Data Flow:
+Azure Blob Storage → Databricks + Delta Lake → Snowflake → Power BI
+
+
 
 
 
